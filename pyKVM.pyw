@@ -73,6 +73,39 @@ def is_startup_enabled():
         return False
 
 
+def is_system_dark_mode():
+    """Checks Windows Registry to see if AppsUseLightTheme is 0 (system dark theme)."""
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+            0,
+            winreg.KEY_READ,
+        ) as key:
+            val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            return int(val) == 0
+    except Exception:
+        return False
+
+
+def apply_window_dark_titlebar(win, dark=True):
+    """Enables Windows 10/11 dark immersive titlebar via DWM."""
+    try:
+        win.update_idletasks()
+        hwnd = int(win.wm_frame(), 16) if win.wm_frame() else ctypes.windll.user32.GetParent(win.winfo_id())
+        value = ctypes.c_int(1 if dark else 0)
+        # DWMWA_USE_IMMERSIVE_DARK_MODE = 20 (Win11 / Win10 20H1+), fallback 19
+        res = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            wintypes.HWND(hwnd), 20, ctypes.byref(value), ctypes.sizeof(value)
+        )
+        if res != 0:
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                wintypes.HWND(hwnd), 19, ctypes.byref(value), ctypes.sizeof(value)
+            )
+    except Exception:
+        pass
+
+
 def set_startup_enabled(enabled):
     """Adds or removes the application from Windows current-user startup registry key."""
     try:
@@ -763,11 +796,9 @@ class KVMConfigWindow:
             self.win.focus_force()
             return
 
+        self.dark_mode = is_system_dark_mode()
         self.win = tk.Toplevel(self.root)
         self.win.title(f"USB KVM Switcher ({APP_NAME} v{APP_VERSION}) — Configuration")
-        self.win.geometry("860x700")
-        self.win.minsize(800, 600)
-        self.win.configure(bg="#f5f6f8")
 
         try:
             bundle_dir = getattr(sys, "_MEIPASS", BASE_DIR)
@@ -780,43 +811,233 @@ class KVMConfigWindow:
             pass
 
         self._setup_styles()
+        apply_window_dark_titlebar(self.win, self.dark_mode)
         self._build_ui()
         self.refresh_all()
+        self._fit_window_to_content(initial=True)
 
         self.win.protocol("WM_DELETE_WINDOW", self.win.destroy)
         self.win.lift()
         self.win.focus_force()
 
+    def _fit_window_to_content(self, initial=False):
+        """Automatically resizes the window and sets minsize so no controls are cropped."""
+        if self.win is None or not self.win.winfo_exists():
+            return
+        self.win.update_idletasks()
+        req_w = max(self.win.winfo_reqwidth() + 20, 880)
+        req_h = max(self.win.winfo_reqheight() + 16, 560)
+        self.win.minsize(req_w, req_h)
+        cur_w = self.win.winfo_width()
+        cur_h = self.win.winfo_height()
+        if initial or cur_w < req_w or cur_h < req_h:
+            new_w = req_w if initial else max(cur_w, req_w)
+            new_h = req_h if initial else max(cur_h, req_h)
+            self.win.geometry(f"{new_w}x{new_h}")
+
     def _setup_styles(self):
         style = ttk.Style(self.win)
-        try:
-            style.theme_use("vista")
-        except Exception:
-            pass
+        if getattr(self, "dark_mode", False):
+            self.colors = {
+                "bg_main": "#0f172a",
+                "bg_card": "#1e293b",
+                "bg_input": "#0f172a",
+                "bg_btn": "#334155",
+                "bg_btn_active": "#475569",
+                "bg_accent": "#2563eb",
+                "bg_accent_active": "#3b82f6",
+                "fg_main": "#f8fafc",
+                "fg_subtle": "#94a3b8",
+                "fg_status": "#cbd5e1",
+                "fg_link": "#60a5fa",
+                "border": "#334155",
+            }
+            try:
+                style.theme_use("clam")
+            except Exception:
+                pass
 
-        style.configure("Main.TFrame", background="#f5f6f8")
-        style.configure("Card.TLabelframe", background="#ffffff", padding=12)
-        style.configure(
-            "Card.TLabelframe.Label",
-            background="#ffffff",
-            foreground="#1e293b",
-            font=("Segoe UI", 10, "bold"),
-        )
-        style.configure("Card.TFrame", background="#ffffff")
-        style.configure("Card.TLabel", background="#ffffff", foreground="#1e293b", font=("Segoe UI", 9))
-        style.configure(
-            "Subtle.TLabel", background="#ffffff", foreground="#64748b", font=("Segoe UI", 8)
-        )
-        style.configure(
-            "Header.TLabel", background="#ffffff", foreground="#0f172a", font=("Segoe UI", 9, "bold")
-        )
-        style.configure(
-            "Badge.TLabel", background="#e2e8f0", foreground="#334155", font=("Segoe UI", 8, "bold")
-        )
-        style.configure("Treeview", font=("Segoe UI", 9), rowheight=26)
-        style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
-        style.configure("Accent.TButton", font=("Segoe UI", 9, "bold"), padding=(12, 5))
-        style.configure("Action.TButton", font=("Segoe UI", 9), padding=(8, 4))
+            c = self.colors
+            self.win.configure(bg=c["bg_main"])
+            self.win.option_add("*TCombobox*Listbox.background", c["bg_input"])
+            self.win.option_add("*TCombobox*Listbox.foreground", c["fg_main"])
+            self.win.option_add("*TCombobox*Listbox.selectBackground", c["bg_accent"])
+            self.win.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
+
+            style.configure(".", background=c["bg_card"], foreground=c["fg_main"], font=("Segoe UI", 9))
+            style.configure("Main.TFrame", background=c["bg_main"])
+            style.configure(
+                "Card.TLabelframe",
+                background=c["bg_card"],
+                bordercolor=c["border"],
+                darkcolor=c["border"],
+                lightcolor=c["border"],
+                padding=12,
+            )
+            style.configure(
+                "Card.TLabelframe.Label",
+                background=c["bg_card"],
+                foreground=c["fg_main"],
+                font=("Segoe UI", 10, "bold"),
+            )
+            style.configure("Card.TFrame", background=c["bg_card"])
+            style.configure("Card.TLabel", background=c["bg_card"], foreground=c["fg_main"], font=("Segoe UI", 9))
+            style.configure(
+                "Subtle.TLabel", background=c["bg_card"], foreground=c["fg_subtle"], font=("Segoe UI", 8)
+            )
+            style.configure(
+                "Header.TLabel", background=c["bg_card"], foreground=c["fg_main"], font=("Segoe UI", 9, "bold")
+            )
+            style.configure(
+                "Treeview",
+                background=c["bg_input"],
+                fieldbackground=c["bg_input"],
+                foreground=c["fg_main"],
+                bordercolor=c["border"],
+                lightcolor=c["border"],
+                darkcolor=c["border"],
+                font=("Segoe UI", 9),
+                rowheight=26,
+            )
+            style.map(
+                "Treeview",
+                background=[("selected", c["bg_accent"])],
+                foreground=[("selected", "#ffffff")],
+            )
+            style.configure(
+                "Treeview.Heading",
+                background=c["bg_btn"],
+                foreground=c["fg_main"],
+                bordercolor=c["border"],
+                font=("Segoe UI", 9, "bold"),
+                padding=(6, 4),
+            )
+            style.map("Treeview.Heading", background=[("active", c["bg_btn_active"])])
+
+            style.configure(
+                "TEntry",
+                fieldbackground=c["bg_input"],
+                foreground=c["fg_main"],
+                insertcolor=c["fg_main"],
+                bordercolor=c["border"],
+                lightcolor=c["border"],
+                darkcolor=c["border"],
+                padding=4,
+            )
+            style.configure(
+                "TSpinbox",
+                fieldbackground=c["bg_input"],
+                background=c["bg_btn"],
+                foreground=c["fg_main"],
+                arrowcolor=c["fg_main"],
+                bordercolor=c["border"],
+                lightcolor=c["border"],
+                darkcolor=c["border"],
+                padding=3,
+            )
+            style.configure(
+                "TCombobox",
+                fieldbackground=c["bg_input"],
+                background=c["bg_btn"],
+                foreground=c["fg_main"],
+                arrowcolor=c["fg_main"],
+                bordercolor=c["border"],
+                lightcolor=c["border"],
+                darkcolor=c["border"],
+                padding=4,
+            )
+            style.map(
+                "TCombobox",
+                fieldbackground=[("readonly", c["bg_input"]), ("!disabled", c["bg_input"])],
+                foreground=[("readonly", c["fg_main"]), ("!disabled", c["fg_main"])],
+                background=[("active", c["bg_btn_active"])],
+            )
+            style.configure(
+                "TCheckbutton",
+                background=c["bg_card"],
+                foreground=c["fg_main"],
+                indicatorbackground=c["bg_input"],
+                indicatorforeground=c["fg_main"],
+                font=("Segoe UI", 9),
+            )
+            style.map(
+                "TCheckbutton",
+                background=[("active", c["bg_card"])],
+                indicatorbackground=[("selected", c["bg_accent"]), ("!selected", c["bg_input"])],
+            )
+            style.configure(
+                "Vertical.TScrollbar",
+                background=c["bg_btn"],
+                troughcolor=c["bg_input"],
+                bordercolor=c["border"],
+                arrowcolor=c["fg_main"],
+            )
+            style.configure(
+                "Action.TButton",
+                background=c["bg_btn"],
+                foreground=c["fg_main"],
+                bordercolor=c["border"],
+                lightcolor=c["bg_btn"],
+                darkcolor=c["bg_btn"],
+                font=("Segoe UI", 9),
+                padding=(10, 4),
+            )
+            style.map(
+                "Action.TButton",
+                background=[("active", c["bg_btn_active"]), ("pressed", c["bg_accent"])],
+                foreground=[("active", "#ffffff")],
+            )
+            style.configure(
+                "Accent.TButton",
+                background=c["bg_accent"],
+                foreground="#ffffff",
+                bordercolor=c["bg_accent"],
+                lightcolor=c["bg_accent"],
+                darkcolor=c["bg_accent"],
+                font=("Segoe UI", 9, "bold"),
+                padding=(14, 5),
+            )
+            style.map(
+                "Accent.TButton",
+                background=[("active", c["bg_accent_active"]), ("pressed", c["bg_accent"])],
+                foreground=[("active", "#ffffff")],
+            )
+        else:
+            self.colors = {
+                "bg_main": "#f5f6f8",
+                "bg_card": "#ffffff",
+                "fg_main": "#1e293b",
+                "fg_subtle": "#64748b",
+                "fg_status": "#475569",
+                "fg_link": "#2563eb",
+            }
+            try:
+                style.theme_use("vista")
+            except Exception:
+                pass
+
+            c = self.colors
+            self.win.configure(bg=c["bg_main"])
+            style.configure("Main.TFrame", background=c["bg_main"])
+            style.configure("Card.TLabelframe", background=c["bg_card"], padding=12)
+            style.configure(
+                "Card.TLabelframe.Label",
+                background=c["bg_card"],
+                foreground=c["fg_main"],
+                font=("Segoe UI", 10, "bold"),
+            )
+            style.configure("Card.TFrame", background=c["bg_card"])
+            style.configure("Card.TLabel", background=c["bg_card"], foreground=c["fg_main"], font=("Segoe UI", 9))
+            style.configure(
+                "Subtle.TLabel", background=c["bg_card"], foreground=c["fg_subtle"], font=("Segoe UI", 8)
+            )
+            style.configure(
+                "Header.TLabel", background=c["bg_card"], foreground="#0f172a", font=("Segoe UI", 9, "bold")
+            )
+            style.configure("Treeview", font=("Segoe UI", 9), rowheight=26)
+            style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
+            style.configure("Accent.TButton", font=("Segoe UI", 9, "bold"), padding=(12, 5))
+            style.configure("Action.TButton", font=("Segoe UI", 9), padding=(8, 4))
 
     def _build_ui(self):
         with config_lock:
@@ -914,7 +1135,7 @@ class KVMConfigWindow:
             text=" 2. Monitor Input Assignment (DDC/CI VCP 0x60) ",
             style="Card.TLabelframe",
         )
-        mon_frame.pack(fill="both", expand=True, pady=(0, 12))
+        mon_frame.pack(fill="x", expand=False, pady=(0, 12))
 
         mon_top = ttk.Frame(mon_frame, style="Card.TFrame")
         mon_top.pack(fill="x", pady=(0, 10))
@@ -941,7 +1162,7 @@ class KVMConfigWindow:
 
         # Table container for monitor rows
         self.mon_table = ttk.Frame(mon_frame, style="Card.TFrame")
-        self.mon_table.pack(fill="both", expand=True)
+        self.mon_table.pack(fill="x", expand=False)
 
         # Quick Test All Bar
         test_bar = ttk.Frame(mon_frame, style="Card.TFrame")
@@ -963,8 +1184,9 @@ class KVMConfigWindow:
         # ------------------------------------------------------------------
         # 3. FOOTER / STATUS, VERSION LINK & SAVE BUTTONS
         # ------------------------------------------------------------------
+        c = self.colors
         footer = ttk.Frame(container, style="Main.TFrame")
-        footer.pack(fill="x")
+        footer.pack(side="bottom", fill="x", pady=(2, 0))
 
         left_footer = ttk.Frame(footer, style="Main.TFrame")
         left_footer.pack(side="left", fill="x", expand=True)
@@ -973,8 +1195,8 @@ class KVMConfigWindow:
         status_lbl = ttk.Label(
             left_footer,
             textvariable=self.status_var,
-            foreground="#475569",
-            background="#f5f6f8",
+            foreground=c["fg_status"],
+            background=c["bg_main"],
             font=("Segoe UI", 9),
         )
         status_lbl.pack(anchor="w")
@@ -984,15 +1206,15 @@ class KVMConfigWindow:
         ttk.Label(
             meta_row,
             text=f"{APP_NAME} v{APP_VERSION}  •  ",
-            foreground="#64748b",
-            background="#f5f6f8",
+            foreground=c["fg_subtle"],
+            background=c["bg_main"],
             font=("Segoe UI", 8),
         ).pack(side="left")
         gh_link = tk.Label(
             meta_row,
             text="GitHub (github.com/elenhinan/kvm-switcher)",
-            fg="#2563eb",
-            bg="#f5f6f8",
+            fg=c["fg_link"],
+            bg=c["bg_main"],
             cursor="hand2",
             font=("Segoe UI", 8, "underline"),
         )
@@ -1235,6 +1457,7 @@ class KVMConfigWindow:
         self.status_var.set(
             f"Loaded {len(self.devices)} physical USB input device(s) and {len(self.monitors)} monitor(s)."
         )
+        self._fit_window_to_content()
 
     def use_all_current_inputs(self):
         updated = 0
