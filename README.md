@@ -6,6 +6,23 @@
 
 ---
 
+## Typical Use Case Scenario
+
+Hardware multi-monitor KVM switches that support high resolutions, high refresh rates (144Hz+), and G-Sync/FreeSync are expensive and often introduce EDID or signal-drop quirks. Instead, you can keep your video cables connected directly to your monitors and use a cheap (\$15–\$25) USB 3.0 switch for your peripherals:
+
+1. **Peripherals on a Cheap USB Switch**:
+   - Plug your keyboard, mouse, webcam, headset/DAC, etc. into an inexpensive 2-port USB switch.
+   - Connect USB Output 1 to your **Desktop PC** and USB Output 2 to your **Laptop Dock**.
+2. **Direct Video Connections**:
+   - **Desktop PC** connects directly to your monitors via **DisplayPort** (`15 - DisplayPort 1`) for full native refresh rate, HDR, and VRR/G-Sync.
+   - **Laptop Dock** connects directly to the same monitors via **HDMI** (`17 - HDMI 1`).
+3. **One-Button Switching with pyKVM**:
+   - Run **pyKVM** on your Desktop PC (configured to watch your keyboard, mouse, or the USB switch's internal hub).
+   - When you press the button on the USB switch to move your keyboard and mouse over to the **Laptop Dock**, **pyKVM** detects the USB disconnect event and automatically switches both monitors to **HDMI 1** (`Other PC`).
+   - When you press the USB switch button to switch back to your **Desktop PC**, **pyKVM** detects the USB reconnect event and switches your monitors right back to **DisplayPort 1** (`This PC`).
+
+---
+
 ## Features
 
 - **Smart USB Connection Tree Discovery**:
@@ -24,7 +41,11 @@
 
 ## Getting Started
 
-### Option 1: Run from Python Source
+### Option 1: Download Pre-Built Executable (Recommended)
+
+Download `pyKVM.exe` directly from the [**GitHub Releases**](https://github.com/elenhinan/kvm-switcher/releases/latest) page and run it. On first launch, the Configuration window will open automatically and save your settings to `config.json` in the same folder.
+
+### Option 2: Run from Python Source
 
 1. Clone this repository:
    ```powershell
@@ -41,7 +62,7 @@
    .\.venv\Scripts\pythonw.exe pyKVM.pyw
    ```
 
-### Option 2: Build a Standalone `.exe`
+### Option 3: Build a Standalone `.exe` Locally
 
 Run the included batch script (or `build_exe.py`) to build a standalone windowless executable in `dist\pyKVM.exe`:
 
@@ -65,7 +86,7 @@ Run the included batch script (or `build_exe.py`) to build a standalone windowle
 
 - Windows 10 / 11
 - Monitors with **DDC/CI** enabled in their On-Screen Display (OSD) settings
-- Python 3.10+ (when running from source)
+- Python 3.10+ (only required when running from source)
 
 ---
 
