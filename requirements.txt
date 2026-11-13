@@ -1,0 +1,6 @@
+monitorcontrol
+Pillow
+pystray
+pywin32
+WMI
+pyinstaller
